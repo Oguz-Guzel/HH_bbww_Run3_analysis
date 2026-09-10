@@ -1,76 +1,152 @@
-![](https://img.shields.io/badge/CMS-Run3-blue)
+![CMS Run 3](https://img.shields.io/badge/CMS-Run%203-blue)
 
-# HH->WWbb Run-3 analysis
+# HH -> WWbb Run 3 analysis
 
-This repository uses the **bamboo analysis framework**, you can install it via the instructions here: https://bamboo-hep.readthedocs.io/en/latest/install.html#fresh-install
+Analysis of the Higgs boson pair-production channel
+`HH -> WWbb` with the CMS Run 3 dataset. The workflow is
+implemented with the [bamboo analysis framework](https://bamboo-hep.readthedocs.io/).
+It produces cutflows, plots, skims, scale factors, and inputs for machine-learning
+studies.
 
-then install CMSJMECalculators and correctionlib
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `python/` | bamboo analysis modules and skimmers |
+| `config/` | Analysis, sample, DAS, and batch configuration |
+| `data/` | Scale factors, corrections, and other analysis inputs |
+| `scripts/` | Utilities for post-processing and systematic studies |
+
+## Prerequisites
+
+- A CMS software environment with CVMFS access (for example, lxplus)
+- Python and a fresh bamboo installation
+- Access to CMS datasets on the grid
+- A valid CMS grid proxy for grid or batch jobs
+
+Install bamboo using its
+[fresh-install instructions](https://bamboo-hep.readthedocs.io/en/latest/install.html#fresh-install).
+Then install the additional dependencies:
+
 ```sh
 git clone https://gitlab.cern.ch/cp3-cms/CMSJMECalculators.git
 pip install ./CMSJMECalculators
 pip install correctionlib
 ```
 
-Finally, clone this repository in the parent directory containing the bamboo installation:
+Clone this repository next to the bamboo installation:
 
 ```sh
-git clone ssh://git@gitlab.cern.ch:7999/aguzel/HHtoWWbb_Run3.git && cd HHtoWWbb_Run3
+git clone https://github.com/Oguz-Guzel/HH_bbww_Run3_analysis.git
+cd HH_bbww_Run3_analysis
 ```
 
-Execute these each time you start from a clean shell on lxplus or any other machine with cvmfs:
+## Environment setup
+
+Run these commands whenever starting a new shell on lxplus or another machine
+with CVMFS:
+
 ```sh
 source /cvmfs/sft.cern.ch/lcg/views/LCG_105/x86_64-el9-gcc11-opt/setup.sh
-source (path to your bamboo installation)/bamboovenv/bin/activate
-export PYTHONPATH="${PYTHONPATH}:${PWD}/python/"
+source <path-to-bamboo>/bamboovenv/bin/activate
+export PYTHONPATH="${PYTHONPATH}:${PWD}/python"
 ```
 
-and the followings before submitting jobs to the batch system (HTCondor, Slurm, Dask and Spark are supported) or running on files stored on the grid:
+Before reading files from the grid or submitting batch jobs, create a CMS
+VOMS proxy:
 
 ```sh
-voms-proxy-init --voms cms -rfc --valid 192:00 
-export X509_USER_PROXY=$(voms-proxy-info -path)
-```
-if you encounter problems with accessing files when using batch, the following lines may solve your problem
-
-```sh
-voms-proxy-init --voms cms -rfc --valid 192:00  --out ~/private/gridproxy/x509
-export X509_USER_PROXY=$HOME/private/gridproxy/x509
+voms-proxy-init --voms cms -rfc --valid 192:00
+export X509_USER_PROXY="$(voms-proxy-info -path)"
 ```
 
-Then cutflow study of the analysis is executed via the following command line using batch (you can pass `--maxFiles 1` to use only 1 file from each sample for a quick test):
+If jobs cannot access grid files, store the proxy at a persistent path:
 
 ```sh
-bambooRun -m python/cutflowAnalysis.py config/<2022 or 2023>_v12.yml -o ./outputDir/ --envConfig config/cern.ini  --distributed driver
-```
-Instead of passing `--envConfig config/cern.ini` everytime, you can copy the content of that file to `~/.config/bamboorc`.
-
-using the skims in the root files that are in the results directory of bamboo output `./outputDir/`, you can perform machine learning applications. Once you get the output from your machine learning (preferably in onnx format), you can execute
-
-```sh
-bambooRun -m python/mvaEvaluator.py config/<2022 or 2023>_v12.yml -o ./outputDir/ --envConfig config/cern.ini  --distributed driver --mvaModel <path to your ML model in onnx format>
-```
-where you get the ML model evaluated on the analysis. Use `--DY_CR` or `--TT_CR` flags to get the ML evaluation in the DY or TT control regions, respectively.
-
-To produce sync skim for syncronization exercises, you can run the following command:
-```sh
-bambooRun -m python/syncSkimmer.py config/2022_v12_sync.yml -o output/syncTest --sync
+voms-proxy-init --voms cms -rfc --valid 192:00 \
+  --out "$HOME/private/gridproxy/x509"
+export X509_USER_PROXY="$HOME/private/gridproxy/x509"
 ```
 
-If you change something in the analysis workflow which you think may have an effect on the dilepton trigger efficienct in the analysis, re-produce dilepton trigger scalefactors with the following command:
+The repository includes `config/cern.ini` for CERN batch execution. Pass it
+with `--envConfig` as shown below, or copy its contents to
+`~/.config/bamboorc` to make it the default bamboo configuration.
+
+## Running the analysis
+
+### Cutflow and plots
+
+Run the cutflow analysis for either the 2022 or 2023 configuration. Add
+`--maxFiles 1` for a quick smoke test using one file per sample.
+
 ```sh
-bambooRun -m python/trigger_eff.py:TriggerEff config/<2022 or 2023>_v12.yml -o ./outputDir/
+bambooRun -m python/cutflowAnalysis.py \
+  config/<2022-or-2023>_v12.yml \
+  -o ./outputDir/ \
+  --envConfig config/cern.ini \
+  --distributed driver
 ```
-To convert the trigger efficiency histograms to JSON format, run:
+
+The configured batch backends include HTCondor, Dask, and Spark. Adjust the
+backend and job settings in `config/cern.ini` when needed.
+
+### Machine-learning evaluation
+
+Use the skims in the bamboo results directory as input to an ML workflow.
+After producing an ONNX model, evaluate it with:
+
 ```sh
+bambooRun -m python/mvaEvaluator.py \
+  config/<2022-or-2023>_v12.yml \
+  -o ./outputDir/ \
+  --envConfig config/cern.ini \
+  --distributed driver \
+  --mvaModel <path-to-model.onnx>
+```
+
+Use `--DY_CR` or `--TT_CR` to evaluate the model in the DY or ttbar control
+region, respectively.
+
+### Synchronization skims
+
+Produce a synchronization skim with:
+
+```sh
+bambooRun -m python/syncSkimmer.py \
+  config/2022_v12_sync.yml \
+  -o output/syncTest \
+  --sync
+```
+
+## Scale factors and systematic inputs
+
+If a workflow change can affect the dilepton trigger efficiency, regenerate the
+trigger scale factors:
+
+```sh
+bambooRun -m python/trigger_eff.py:TriggerEff \
+  config/<2022-or-2023>_v12.yml \
+  -o ./outputDir/
 python scripts/trg_eff_to_json.py --bamboo_output ./outputDir/
-``` 
-or if you think that a similar effect may be present in the b-tagging scalefactors, re-produce them with:
-```sh
-bambooRun -m python/btagReweighting.py config/<2022 or 2023>_v12.yml -o ./outputDir/
-``` 
-and copy the produced b-tagging scale factor files from the output directory to `data/` folder.
-
-compute LHE weights for muRF variations with:
-```sh
-python scripts/compute_lhe_scale_sumw.py --years 2022 --max-files 3 --workers 16 --output data/LHEScaleSumw_2022.yaml 
 ```
+
+If a change can affect b-tagging, regenerate the b-tagging reweighting files
+and copy the resulting files from the output directory into `data/`:
+
+```sh
+bambooRun -m python/btagReweighting.py \
+  config/<2022-or-2023>_v12.yml \
+  -o ./outputDir/
+```
+
+Compute LHE scale-sum weights for muRF variations with:
+
+```sh
+python scripts/compute_lhe_scale_sumw.py \
+  --years 2022 \
+  --max-files 3 \
+  --workers 16 \
+  --output data/LHEScaleSumw_2022.yaml
+```
+
+Replace `2022` with `2023` when producing the corresponding Run 3 input.
